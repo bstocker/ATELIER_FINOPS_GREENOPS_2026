@@ -70,7 +70,7 @@ with col1:
     )
 
 with col2:
-    teams = ["(toutes)"] + sorted(df.tag_team.replace("", "(non-taggé)").unique().tolist())
+    teams = ["(toutes)"] + sorted(df.tag_team.fillna("").replace("", "(non-taggé)").unique().tolist())
     team = st.selectbox("Équipe", teams)
 
 with col3:
