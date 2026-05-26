@@ -2,31 +2,52 @@ import nbformat
 
 nb = nbformat.v4.new_notebook()
 nb.cells = [
-    nbformat.v4.new_markdown_cell("# Atelier 1 — Notebook 3 : Allocation des coûts non taggés"),
+    nbformat.v4.new_markdown_cell(
+        "# Atelier 1 — Notebook 3 : Allocation des coûts partagés (exercice)\n\n"
+        "**Objectif** : implémenter 3 stratégies de répartition des coûts non taggés et comparer leurs effets.\n\n"
+        "Pré-requis : avoir exécuté le notebook 2 (couverture de tagging). Le constat est qu'une partie du coût "
+        "n'est rattachée à aucune équipe — il faut bien la répartir d'une façon ou d'une autre pour facturer en interne "
+        "(showback / chargeback).\n\n"
+        "| Méthode | Principe |\n"
+        "|---|---|\n"
+        "| **Even split** | Diviser également entre toutes les équipes |\n"
+        "| **Proportional** | Proportionnel à la conso taggée |\n"
+        "| **Custom weights** | Pondération métier (ex: équipes plateforme moins ponctionnées) |\n\n"
+        "**Règle d'or** : quelle que soit la méthode, la **somme allouée doit être égale à la somme totale** "
+        "(conservation des coûts)."
+    ),
     nbformat.v4.new_code_cell(
         "import pandas as pd\n"
-        "import plotly.express as px\n"
         "from pathlib import Path\n"
         "\n"
-        "df = pd.read_csv(Path('../../ressources/datasets/cur_sample.csv'), parse_dates=['usage_date'])\n"
-        "for col in ['tag_team', 'tag_env', 'tag_project']:\n"
-        "    df[col] = df[col].replace('', pd.NA)\n"
+        "pd.set_option('display.float_format', '${:,.2f}'.format)"
+    ),
+    nbformat.v4.new_markdown_cell("## Cellule 1 — Chargement et séparation taggé / non taggé"),
+    nbformat.v4.new_code_cell(
+        "CUR_PATH = Path('../../ressources/datasets/cur_sample.csv')\n"
+        "df = pd.read_csv(CUR_PATH, parse_dates=['usage_date'])\n"
+        "df['tag_team'] = df['tag_team'].replace('', pd.NA)\n"
         "\n"
-        "df_tagged   = df[df['tag_team'].notna()].copy()\n"
+        "df_tagged = df[df['tag_team'].notna()].copy()\n"
         "df_untagged = df[df['tag_team'].isna()].copy()\n"
         "\n"
-        "print(f'Couts tagges    : ${df_tagged.unblended_cost.sum():,.2f}')\n"
-        "print(f'Couts non tagges: ${df_untagged.unblended_cost.sum():,.2f}')\n"
-        "print(f'Total           : ${df.unblended_cost.sum():,.2f}')"
+        "total_tagged = df_tagged['unblended_cost'].sum()\n"
+        "total_untagged = df_untagged['unblended_cost'].sum()\n"
+        "total = total_tagged + total_untagged\n"
+        "\n"
+        "print(f'Cout total : ${total:,.2f}')\n"
+        "print(f'  - dont tagge    : ${total_tagged:,.2f} ({total_tagged / total * 100:.1f}%)')\n"
+        "print(f'  - dont non tagge: ${total_untagged:,.2f} ({total_untagged / total * 100:.1f}%)')\n"
+        "print(f\"\\nEquipes identifiees : {sorted(df_tagged['tag_team'].unique())}\")"
     ),
     nbformat.v4.new_markdown_cell(
-        "## Méthode 1 : Even split\n\n"
-        "Le coût non taggé est divisé également entre toutes les équipes identifiées."
+        "## Cellule 2 — Méthode 1 : Even split\n\n"
+        "Le coût non taggé est divisé **également** entre toutes les équipes identifiées."
     ),
     nbformat.v4.new_code_cell(
         "def allocate_even(df_tagged: pd.DataFrame, df_untagged: pd.DataFrame) -> pd.DataFrame:\n"
         "    \"\"\"\n"
-        "    Répartit les coûts non taggés à parts égales entre toutes les équipes.\n"
+        "    Repartit les couts non tagges a parts egales entre toutes les equipes.\n"
         "    Retourne un DataFrame [tag_team, cout_tagge, cout_alloue, cout_total].\n"
         "    \"\"\"\n"
         "    cout_tagge = (\n"
@@ -46,14 +67,15 @@ nb.cells = [
         "display(result_even)"
     ),
     nbformat.v4.new_markdown_cell(
-        "## Méthode 2 : Proportional\n\n"
-        "Le coût non taggé est réparti proportionnellement au coût taggé de chaque équipe."
+        "## Cellule 3 — Méthode 2 : Proportional\n\n"
+        "Le coût non taggé est réparti **proportionnellement au coût taggé** de chaque équipe.\n\n"
+        "*Exemple* : si l'équipe `payments` représente 40% du coût taggé, elle reçoit 40% du coût non taggé."
     ),
     nbformat.v4.new_code_cell(
         "def allocate_proportional(df_tagged: pd.DataFrame, df_untagged: pd.DataFrame) -> pd.DataFrame:\n"
         "    \"\"\"\n"
-        "    Répartit les coûts non taggés proportionnellement aux coûts taggés par équipe.\n"
-        "    Retourne un DataFrame avec le coût total alloué par équipe.\n"
+        "    Repartit les couts non tagges proportionnellement aux couts tagges par equipe.\n"
+        "    Retourne un DataFrame avec le cout total alloue par equipe.\n"
         "    \"\"\"\n"
         "    cout_tagge = (\n"
         "        df_tagged.groupby('tag_team')['unblended_cost']\n"
@@ -75,8 +97,9 @@ nb.cells = [
         "display(result_proportional)"
     ),
     nbformat.v4.new_markdown_cell(
-        "## Méthode 3 : Custom weights\n\n"
-        "Pondération métier : platform reçoit 50% de sa part proportionnelle."
+        "## Cellule 4 — Méthode 3 : Custom weights\n\n"
+        "On utilise une pondération métier. Exemple ici : les équipes `platform` ne reçoivent que 50% de leur part "
+        "proportionnelle (elles fournissent un service mutualisé), le reste est repris sur les équipes produit."
     ),
     nbformat.v4.new_code_cell(
         "WEIGHTS = {\n"
@@ -88,6 +111,10 @@ nb.cells = [
         "\n"
         "def allocate_weighted(df_tagged: pd.DataFrame, df_untagged: pd.DataFrame,\n"
         "                      weights: dict) -> pd.DataFrame:\n"
+        "    \"\"\"\n"
+        "    Allocation ponderee : chaque equipe recoit (poids x cout tagge) / somme(poids x cout tagge)\n"
+        "    fois le cout non tagge. La somme totale est conservee.\n"
+        "    \"\"\"\n"
         "    cout_tagge = (\n"
         "        df_tagged.groupby('tag_team')['unblended_cost']\n"
         "                 .sum()\n"
@@ -110,28 +137,64 @@ nb.cells = [
         "result_weighted = allocate_weighted(df_tagged, df_untagged, WEIGHTS)\n"
         "display(result_weighted)"
     ),
-    nbformat.v4.new_markdown_cell("## Graphique de comparaison des 3 méthodes"),
+    nbformat.v4.new_markdown_cell(
+        "## Cellule 5 — Tests de conservation\n\n"
+        "Pour chaque méthode, la **somme allouée doit être égale au coût total** (à 1 centime près). "
+        "Si un test échoue, il y a une fuite dans la répartition."
+    ),
     nbformat.v4.new_code_cell(
-        "comparison = pd.DataFrame({\n"
-        "    'equipe': result_proportional['tag_team'],\n"
-        "    'Even split':   result_even.set_index('tag_team').loc[result_proportional['tag_team'], 'cout_total'].values,\n"
-        "    'Proportional': result_proportional['cout_total'].values,\n"
-        "    'Custom weights': result_weighted.set_index('tag_team').loc[result_proportional['tag_team'], 'cout_total'].values,\n"
-        "})\n"
+        "def check_conservation(result: pd.DataFrame, expected_total: float, label: str) -> None:\n"
+        "    if result is None:\n"
+        "        print(f'X {label:<15} : fonction non implementee')\n"
+        "        return\n"
+        "    allocated = result['cout_total'].sum()\n"
+        "    diff = abs(allocated - expected_total)\n"
+        "    status = 'OK' if diff < 0.01 else 'ERREUR'\n"
+        "    print(f'{status} {label:<15} : alloue=${allocated:,.2f} | attendu=${expected_total:,.2f} | ecart=${diff:,.4f}')\n"
         "\n"
-        "comparison_melted = comparison.melt(id_vars='equipe', var_name='methode', value_name='cout_total')\n"
+        "check_conservation(result_even,         total, 'Even split')\n"
+        "check_conservation(result_proportional, total, 'Proportional')\n"
+        "check_conservation(result_weighted,     total, 'Weighted')"
+    ),
+    nbformat.v4.new_markdown_cell(
+        "## Cellule 6 — Comparaison des 3 méthodes\n\n"
+        "À exécuter une fois les 3 fonctions implémentées. La table montre combien chaque équipe paie selon "
+        "la méthode choisie — c'est exactement ce qui se passe en réunion FinOps quand on choisit une politique "
+        "de chargeback."
+    ),
+    nbformat.v4.new_code_cell(
+        "if all(r is not None for r in [result_even, result_proportional, result_weighted]):\n"
+        "    compare = (\n"
+        "        result_even[['tag_team', 'cout_total']].rename(columns={'cout_total': 'even'})\n"
+        "        .merge(result_proportional[['tag_team', 'cout_total']]\n"
+        "               .rename(columns={'cout_total': 'proportional'}), on='tag_team')\n"
+        "        .merge(result_weighted[['tag_team', 'cout_total']]\n"
+        "               .rename(columns={'cout_total': 'weighted'}), on='tag_team')\n"
+        "        .sort_values('proportional', ascending=False)\n"
+        "    )\n"
+        "    display(compare)\n"
         "\n"
-        "fig = px.bar(\n"
-        "    comparison_melted,\n"
-        "    x='equipe', y='cout_total', color='methode',\n"
-        "    barmode='group',\n"
-        "    title='Comparaison des 3 méthodes d\\'allocation par équipe',\n"
-        "    labels={'cout_total': 'Coût total alloué ($)', 'equipe': 'Équipe', 'methode': 'Méthode'},\n"
-        "    color_discrete_sequence=['#1f77b4', '#2ca02c', '#d62728']\n"
-        ")\n"
-        "fig.update_layout(yaxis_tickprefix='$', yaxis_tickformat=',.0f')\n"
-        "fig.show()\n"
-        "print('=> Sauvegarder ce graphique avec le bouton camera en haut a droite du graphique')"
+        "    try:\n"
+        "        import plotly.express as px\n"
+        "        fig = px.bar(\n"
+        "            compare.melt(id_vars='tag_team', var_name='methode', value_name='cout'),\n"
+        "            x='tag_team', y='cout', color='methode', barmode='group',\n"
+        "            title='Cout alloue par equipe selon la methode de repartition'\n"
+        "        )\n"
+        "        fig.show()\n"
+        "    except ImportError:\n"
+        "        pass\n"
+        "else:\n"
+        "    print('Implemente les 3 fonctions avant de lancer la comparaison.')"
+    ),
+    nbformat.v4.new_markdown_cell(
+        "## Questions de débrief\n\n"
+        "1. Quelle équipe est **avantagée** par la méthode `even` ? Pourquoi est-ce probablement injuste ?\n"
+        "2. Quelle équipe est **pénalisée** par la méthode `proportional` ? Est-ce légitime selon vous ?\n"
+        "3. Comment justifieriez-vous la pondération `platform = 0.5` auprès des autres équipes ? "
+        "Quels effets pervers anticipez-vous ?\n"
+        "4. À votre avis, dans une vraie organisation, quel est le **vrai facteur de succès** d'une politique "
+        "de chargeback : la précision du calcul, ou autre chose ?"
     ),
 ]
 
