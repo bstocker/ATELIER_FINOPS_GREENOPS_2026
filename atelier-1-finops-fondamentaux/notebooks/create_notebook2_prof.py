@@ -1,0 +1,195 @@
+import nbformat
+
+nb = nbformat.v4.new_notebook()
+nb.cells = [
+    nbformat.v4.new_markdown_cell(
+        "# Atelier 1 — Notebook 2 : Couverture de tagging\n\n"
+        "**Objectif** : mesurer la qualité du tagging d'un parc cloud à partir du CUR.\n\n"
+        "Sans tags, **impossible d'attribuer un coût à une équipe** ou un projet. Ce notebook calcule :\n\n"
+        "1. Le **pourcentage de coûts taggés** par dimension (`team`, `env`, `project`)\n"
+        "2. Les **services orphelins** (coûts sans tag)\n"
+        "3. Une **matrice de couverture** par compte × service\n\n"
+        "Le résultat sert d'input à la Partie 3 du README (stratégie de répartition des coûts partagés)."
+    ),
+    nbformat.v4.new_code_cell(
+        "import pandas as pd\n"
+        "import plotly.express as px\n"
+        "from pathlib import Path\n"
+        "\n"
+        "pd.set_option('display.max_columns', 50)\n"
+        "pd.set_option('display.float_format', '${:,.2f}'.format)"
+    ),
+    nbformat.v4.new_markdown_cell(
+        "## Cellule 1 — Chargement du dataset\n\n"
+        "On réutilise le même CUR simplifié que le notebook 1. Les colonnes `tag_team`, `tag_env`, `tag_project` "
+        "peuvent être vides (`NaN` ou chaîne vide) : c'est précisément ce qu'on va mesurer."
+    ),
+    nbformat.v4.new_code_cell(
+        "CUR_PATH = Path('../../ressources/datasets/cur_sample.csv')\n"
+        "df = pd.read_csv(CUR_PATH, parse_dates=['usage_date'])\n"
+        "\n"
+        "TAG_COLS = ['tag_team', 'tag_env', 'tag_project']\n"
+        "for col in TAG_COLS:\n"
+        "    df[col] = df[col].replace('', pd.NA)\n"
+        "\n"
+        "account_labels = {\n"
+        "    '111111111111': 'prod',\n"
+        "    '222222222222': 'staging',\n"
+        "    '333333333333': 'dev',\n"
+        "    '444444444444': 'sandbox',\n"
+        "}\n"
+        "df['account_id'] = df['account_id'].astype(str)\n"
+        "df['account_name'] = df['account_id'].map(account_labels)\n"
+        "\n"
+        "print(f'Lignes : {len(df):,}')\n"
+        "print(f'Coût total : ${df.unblended_cost.sum():,.2f}')\n"
+        "df.head()"
+    ),
+    nbformat.v4.new_markdown_cell(
+        "## Cellule 2 — Taux de couverture global par dimension\n\n"
+        "Pour chaque tag, on calcule :\n"
+        "- **% lignes taggées** (combien de lignes CUR portent ce tag)\n"
+        "- **% coût taggé** (quelle part du \\$ total est couverte)\n\n"
+        "👉 Le % en coût est **toujours plus important** que le % en lignes : un seul tag manquant sur une grosse "
+        "instance fait plus mal que dix tags manquants sur des petites lignes."
+    ),
+    nbformat.v4.new_code_cell(
+        "total_cost = df['unblended_cost'].sum()\n"
+        "total_rows = len(df)\n"
+        "\n"
+        "coverage = []\n"
+        "for col in TAG_COLS:\n"
+        "    tagged = df[df[col].notna()]\n"
+        "    coverage.append({\n"
+        "        'dimension': col.replace('tag_', ''),\n"
+        "        'pct_lignes_taggees': len(tagged) / total_rows * 100,\n"
+        "        'pct_cout_tagge': tagged['unblended_cost'].sum() / total_cost * 100,\n"
+        "        'cout_non_tagge': total_cost - tagged['unblended_cost'].sum(),\n"
+        "    })\n"
+        "\n"
+        "coverage_df = pd.DataFrame(coverage)\n"
+        "display(coverage_df)\n"
+        "\n"
+        "fig = px.bar(\n"
+        "    coverage_df.melt(id_vars='dimension',\n"
+        "                     value_vars=['pct_lignes_taggees', 'pct_cout_tagge'],\n"
+        "                     var_name='mesure', value_name='pourcentage'),\n"
+        "    x='dimension', y='pourcentage', color='mesure', barmode='group',\n"
+        "    title='Couverture de tagging — % lignes vs % coût',\n"
+        "    labels={'pourcentage': '% couvert', 'dimension': 'Tag'}\n"
+        ")\n"
+        "fig.update_yaxes(range=[0, 100])\n"
+        "fig.show()"
+    ),
+    nbformat.v4.new_markdown_cell(
+        "## Cellule 3 — Services orphelins\n\n"
+        "Un **service orphelin** est un service AWS dont une part significative du coût n'est rattachée à aucune "
+        "équipe (`tag_team` manquant).\n\n"
+        "On veut connaître, pour chaque service :\n"
+        "- le coût total\n"
+        "- le coût non taggé\n"
+        "- le **% orphelin**\n\n"
+        "Les services en haut de cette liste sont les premières cibles d'une campagne de tagging."
+    ),
+    nbformat.v4.new_code_cell(
+        "by_service = df.groupby('service').agg(\n"
+        "    cout_total=('unblended_cost', 'sum'),\n"
+        "    cout_non_tagge=('unblended_cost',\n"
+        "                    lambda s: s[df.loc[s.index, 'tag_team'].isna()].sum()),\n"
+        ").reset_index()\n"
+        "by_service['pct_orphelin'] = by_service['cout_non_tagge'] / by_service['cout_total'] * 100\n"
+        "by_service = by_service.sort_values('cout_non_tagge', ascending=False)\n"
+        "\n"
+        "display(by_service)\n"
+        "\n"
+        "fig = px.bar(\n"
+        "    by_service, x='service', y='pct_orphelin',\n"
+        "    hover_data=['cout_total', 'cout_non_tagge'],\n"
+        "    title='% de coût non taggé (team) par service',\n"
+        "    labels={'pct_orphelin': '% orphelin', 'service': 'Service AWS'},\n"
+        "    color='pct_orphelin', color_continuous_scale='Reds'\n"
+        ")\n"
+        "fig.update_yaxes(range=[0, 100])\n"
+        "fig.show()"
+    ),
+    nbformat.v4.new_markdown_cell(
+        "## Cellule 4 — Matrice de couverture compte × service\n\n"
+        "Heatmap du **taux de couverture `team`** (en %) croisant comptes et services. "
+        "Les cases rouges sont les zones à traiter en priorité."
+    ),
+    nbformat.v4.new_code_cell(
+        "df['_tagged_team'] = df['tag_team'].notna().astype(int) * df['unblended_cost']\n"
+        "\n"
+        "pivot_total = df.pivot_table(\n"
+        "    index='service', columns='account_name',\n"
+        "    values='unblended_cost', aggfunc='sum', fill_value=0\n"
+        ")\n"
+        "pivot_tagged = df.pivot_table(\n"
+        "    index='service', columns='account_name',\n"
+        "    values='_tagged_team', aggfunc='sum', fill_value=0\n"
+        ")\n"
+        "coverage_matrix = (pivot_tagged / pivot_total.replace(0, pd.NA) * 100).fillna(0)\n"
+        "\n"
+        "fig = px.imshow(\n"
+        "    coverage_matrix, text_auto='.0f', aspect='auto',\n"
+        "    color_continuous_scale='RdYlGn', zmin=0, zmax=100,\n"
+        "    title='Taux de couverture tag_team par compte × service (%)'\n"
+        ")\n"
+        "fig.show()\n"
+        "\n"
+        "df.drop(columns=['_tagged_team'], inplace=True)"
+    ),
+    nbformat.v4.new_markdown_cell(
+        "## Cellule 5 — Coûts taggés par équipe (showback minimal)\n\n"
+        "On agrège le coût taggé par équipe : c'est l'embryon d'un **rapport de showback**. "
+        "Le bloc `non taggé` représente le \\$ qu'on ne sait pas attribuer — il faudra le répartir (cf. notebook 03)."
+    ),
+    nbformat.v4.new_code_cell(
+        "team_costs = (\n"
+        "    df.assign(tag_team=df['tag_team'].fillna('(non taggé)'))\n"
+        "      .groupby('tag_team')['unblended_cost'].sum()\n"
+        "      .reset_index().sort_values('unblended_cost', ascending=False)\n"
+        ")\n"
+        "display(team_costs)\n"
+        "\n"
+        "fig = px.pie(\n"
+        "    team_costs, values='unblended_cost', names='tag_team',\n"
+        "    title='Répartition du coût par équipe (incl. non taggé)'\n"
+        ")\n"
+        "fig.show()"
+    ),
+    nbformat.v4.new_markdown_cell(
+        "## Cellule 6 — Synthèse pour le rapport\n\n"
+        "Chiffres clés à reporter dans la restitution de l'atelier."
+    ),
+    nbformat.v4.new_code_cell(
+        "untagged_team_cost = df[df['tag_team'].isna()]['unblended_cost'].sum()\n"
+        "worst_service = by_service.iloc[0]\n"
+        "\n"
+        "print('========== SYNTHESE TAGGING ==========')\n"
+        "print(f'Cout total : ${total_cost:,.2f}')\n"
+        "print()\n"
+        "for row in coverage:\n"
+        "    print(f\"Couverture {row['dimension']:<8} : \"\n"
+        "          f\"{row['pct_cout_tagge']:.1f}% du cout ({row['pct_lignes_taggees']:.1f}% des lignes)\")\n"
+        "print()\n"
+        "print(f'Cout non rattache a une equipe : ${untagged_team_cost:,.2f} '\n"
+        "      f'({untagged_team_cost / total_cost * 100:.1f}%)')\n"
+        "print()\n"
+        "print(f\"Service le plus orphelin : {worst_service['service']} \"\n"
+        "      f\"— ${worst_service['cout_non_tagge']:,.2f} non tagges \"\n"
+        "      f\"({worst_service['pct_orphelin']:.1f}%)\")"
+    ),
+    nbformat.v4.new_markdown_cell(
+        "## Questions de débrief\n\n"
+        "1. Quelle dimension de tag est la **moins bien couverte** ? Pourquoi à votre avis ?\n"
+        "2. Y a-t-il des services pour lesquels le tagging est **structurellement impossible** ? "
+        "(cf. data transfer, services partagés)\n"
+        "3. Si vous deviez fixer un **objectif** de couverture trimestriel, quel chiffre proposeriez-vous et pourquoi ?\n"
+        "4. Comment passeriez-vous d'un constat (ce notebook) à une **action** (campagne de tagging) "
+        "sans braquer les équipes ?"
+    ),
+]
+
+nbformat.write(nb, '02-tagging-coverage.ipynb')
+print("OK - notebook 02 prof cree")
