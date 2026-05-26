@@ -27,7 +27,10 @@ ACCOUNT_LABELS = {
 @st.cache_data
 def load_data():
     df = pd.read_csv(CUR_PATH, parse_dates=["usage_date"])
+    df["account_id"] = df["account_id"].astype(str)
     df["account_name"] = df["account_id"].map(ACCOUNT_LABELS)
+    for col in [c for c in df.columns if c.startswith("tag_")]:
+        df[col] = df[col].fillna("").astype(str)
     return df
 
 
@@ -44,14 +47,14 @@ budgets = load_budgets()
 st.title("💰 FinOps Showback Dashboard")
 st.caption("Atelier 1 — données synthétiques, période de 90 jours")
 
-# ─── KPI couverture tagging (Exercice 5.1) ──────────────────────────
+# ─── Exercice 5.1 — KPI couverture tagging multi-dimensions ─────────
+st.markdown("### 🏷️ Couverture tagging (sur 100% des coûts)")
 total_cost = df.unblended_cost.sum()
 tag_coverage = {
     "tag_team":    df[df.tag_team    != ""].unblended_cost.sum() / total_cost * 100,
     "tag_env":     df[df.tag_env     != ""].unblended_cost.sum() / total_cost * 100,
     "tag_project": df[df.tag_project != ""].unblended_cost.sum() / total_cost * 100,
 }
-st.markdown("### 🏷️ Couverture tagging (sur 100% des coûts)")
 tc1, tc2, tc3 = st.columns(3)
 tc1.metric("tag_team",    f"{tag_coverage['tag_team']:.1f}%",    delta="objectif 100%")
 tc2.metric("tag_env",     f"{tag_coverage['tag_env']:.1f}%",     delta="objectif 100%")
@@ -70,7 +73,7 @@ with col1:
     )
 
 with col2:
-    teams = ["(toutes)"] + sorted(df.tag_team.fillna("").replace("", "(non-taggé)").unique().tolist())
+    teams = ["(toutes)"] + sorted(df.tag_team.replace("", "(non-taggé)").unique().tolist())
     team = st.selectbox("Équipe", teams)
 
 with col3:
@@ -86,15 +89,15 @@ if account != "(tous)":
     mask &= df.account_name == account
 filtered = df[mask]
 
-# ─── KPIs principaux ────────────────────────────────────────────────
+# ─── KPIs ───────────────────────────────────────────────────────────
 st.markdown("### 📊 Indicateurs clés")
 k1, k2, k3, k4 = st.columns(4)
 k1.metric("Coût total", f"${filtered.unblended_cost.sum():,.0f}")
 k2.metric("Coût moyen / jour", f"${filtered.groupby('usage_date').unblended_cost.sum().mean():,.0f}")
 k3.metric("Nombre de services", filtered.service.nunique())
-k4.metric("Couverture tagging", f"{(filtered.tag_team != '').mean() * 100:.1f}%")
+k4.metric("Couverture tagging (équipe)", f"{(filtered.tag_team != '').mean() * 100:.1f}%")
 
-# ─── Graphique tendance + forecast (Exercice 5 bonus) ───────────────
+# ─── Exercice 5 bonus — Tendance + forecast 30 jours ────────────────
 st.markdown("### 📈 Tendance journalière + forecast 30 jours")
 daily = filtered.groupby("usage_date").unblended_cost.sum().reset_index()
 daily["day_num"] = (daily.usage_date - daily.usage_date.min()).dt.days
@@ -117,7 +120,7 @@ fig = px.line(combined, x="usage_date", y="unblended_cost", color="type",
               labels={"unblended_cost": "Coût ($)", "usage_date": "Date"})
 st.plotly_chart(fig, use_container_width=True)
 
-# ─── Budget vs Réel (Exercice 5.2 + 5.3) ───────────────────────────
+# ─── Exercice 5.2 + 5.3 — Budget vs Réel + alertes ─────────────────
 st.markdown("### 💼 Budget vs Réel par équipe")
 n_months = (df.usage_date.max() - df.usage_date.min()).days / 30
 team_cost = (
@@ -140,7 +143,7 @@ fig2.add_bar(name="Réel moyen/mois", x=team_cost.equipe, y=team_cost.cout_mensu
 fig2.update_layout(barmode="group", yaxis_title="Coût ($)")
 st.plotly_chart(fig2, use_container_width=True)
 
-# Alertes (Exercice 5.3)
+# Alertes exercice 5.3
 alerts = team_cost[team_cost.pct_budget > 110]
 if not alerts.empty:
     for _, row in alerts.iterrows():
